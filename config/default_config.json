@@ -1,0 +1,49 @@
+{
+    "rate_limits": {
+        "messages_per_minute": 5,
+        "friend_requests_per_minute": 2,
+        "cooldown_period": 300,
+        "jitter_percent": 20,
+        "auto_delay_enabled": true
+    },
+    "message_templates": [
+        {
+            "name": "Default Template",
+            "content": "Hello {username}, this is a default message template. You can customize this message in the settings.",
+            "variables": ["username"]
+        }
+    ],
+    "tokens": [],
+    "users": [],
+    "scraping": {
+        "servers": [],
+        "max_members_per_server": 1000,
+        "scrape_timeout": 60
+    },
+    "logging": {
+        "level": "INFO",
+        "file_enabled": true,
+        "file_path": "logs/discord_dm_tool.log",
+        "console_enabled": true
+    },
+    "proxy": {
+        "enabled": false,
+        "type": "http",
+        "host": "",
+        "port": 0,
+        "username": "",
+        "password": ""
+    },
+    "dm_settings": {
+        "auto_friend_request": true,
+        "await_acceptance": true,
+        "retry_failed": true,
+        "max_retries": 3,
+        "track_statistics": true
+    },
+    "ui": {
+        "theme": "default",
+        "show_progress_bar": true,
+        "verbose_output": false
+    }
+}
