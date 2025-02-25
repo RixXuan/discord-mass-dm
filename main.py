@@ -12,7 +12,8 @@ import logging
 from pathlib import Path
 
 # Add the project root to the Python path
-sys.path.insert(0, str(Path(__file__).parent))
+project_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(project_di)
 
 from config.settings import load_config, save_config
 from utils.logger import setup_logger
