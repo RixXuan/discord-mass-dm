@@ -13,7 +13,7 @@ from pathlib import Path
 
 # Add the project root to the Python path
 project_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(project_di)
+sys.path.append(project_dir)
 
 from config.settings import load_config, save_config
 from utils.logger import setup_logger
