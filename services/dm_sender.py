@@ -76,7 +76,7 @@ class DMSender:
     
     async def send_dm(self, user_id: str, message: str, token: str) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
         """
-        Send a direct message to a Discord user.
+        Send a direct message to a Discord user using direct API call.
         
         Args:
             user_id (str): The Discord ID of the user to message.
@@ -89,113 +89,73 @@ class DMSender:
                 - Status message
                 - Optional metadata about the result
         """
-        # Set up Discord client
-        intents = discord.Intents.default()
-        intents.dm_messages = True
+        logger.info(f"Attempting to send DM to user {user_id} via API")
         
-        client = commands.Bot(command_prefix="!", intents=intents)
+        headers = {
+            'Authorization': token,
+            'Content-Type': 'application/json'
+        }
         
-        result = {"success": False, "status": "", "metadata": None}
-        
-        @client.event
-        async def on_ready():
-            """Called when the client is ready."""
-            nonlocal result
-            
-            try:
-                # Get the user
-                user = None
-                try:
-                    user = await client.fetch_user(int(user_id))
-                except discord.errors.NotFound:
-                    result = {
-                        "success": False,
-                        "status": "User not found",
-                        "metadata": {"error_type": "user_not_found"}
-                    }
-                    await client.close()
-                    return
-                except Exception as e:
-                    result = {
-                        "success": False,
-                        "status": f"Error fetching user: {e}",
-                        "metadata": {"error_type": "fetch_error", "error": str(e)}
-                    }
-                    await client.close()
-                    return
-                
-                if not user:
-                    result = {
-                        "success": False,
-                        "status": "User not found",
-                        "metadata": {"error_type": "user_not_found"}
-                    }
-                    await client.close()
-                    return
-                
-                # Create a DM channel and send message
-                try:
-                    dm_channel = await user.create_dm()
-                    await dm_channel.send(message)
-                    
-                    result = {
-                        "success": True,
-                        "status": "Message sent successfully",
-                        "metadata": {
-                            "user_id": user_id,
-                            "username": user.name,
-                            "discriminator": user.discriminator if hasattr(user, 'discriminator') else "",
-                            "sent_at": time.time()
-                        }
-                    }
-                except discord.errors.Forbidden:
-                    result = {
-                        "success": False,
-                        "status": "Cannot send message to this user",
-                        "metadata": {"error_type": "forbidden"}
-                    }
-                except discord.errors.HTTPException as e:
-                    # Check if rate limited
-                    if e.status == 429:
-                        wait_time = e.retry_after if hasattr(e, 'retry_after') else self.cooldown_period
-                        
-                        result = {
-                            "success": False,
-                            "status": f"Rate limited. Try again in {wait_time} seconds",
-                            "metadata": {"error_type": "rate_limited", "retry_after": wait_time}
-                        }
-                    else:
-                        result = {
-                            "success": False,
-                            "status": f"HTTP error: {e}",
-                            "metadata": {"error_type": "http_error", "error": str(e), "code": e.status}
-                        }
-                except Exception as e:
-                    result = {
-                        "success": False,
-                        "status": f"Error sending message: {e}",
-                        "metadata": {"error_type": "unknown", "error": str(e)}
-                    }
-            
-            except Exception as e:
-                result = {
-                    "success": False,
-                    "status": f"Unexpected error: {e}",
-                    "metadata": {"error_type": "unexpected", "error": str(e)}
-                }
-            
-            finally:
-                await client.close()
-        
-        # Start the client
         try:
-            await client.start(token)
-        except discord.errors.LoginFailure:
-            return False, "Invalid Discord token", {"error_type": "invalid_token"}
-        except Exception as e:
-            return False, f"Error during login: {e}", {"error_type": "login_error", "error": str(e)}
+            async with aiohttp.ClientSession() as session:
+                # 步骤1: 创建DM通道
+                create_dm_url = 'https://discord.com/api/v9/users/@me/channels'
+                create_dm_payload = {'recipient_id': user_id}
+                
+                async with session.post(
+                    create_dm_url, 
+                    headers=headers, 
+                    json=create_dm_payload
+                ) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        logger.error(f"Failed to create DM channel: {error_text}")
+                        return False, f"Failed to create DM channel: Status {response.status}", {
+                            "error_type": "channel_creation_failed",
+                            "status_code": response.status
+                        }
+                    
+                    channel_data = await response.json()
+                    channel_id = channel_data.get('id')
+                    
+                    if not channel_id:
+                        return False, "Could not get DM channel ID", {"error_type": "no_channel_id"}
+                    
+                    # 步骤2: 发送消息
+                    send_message_url = f'https://discord.com/api/v9/channels/{channel_id}/messages'
+                    message_payload = {'content': message}
+                    
+                    async with session.post(
+                        send_message_url, 
+                        headers=headers, 
+                        json=message_payload
+                    ) as msg_response:
+                        if msg_response.status == 200 or msg_response.status == 201:
+                            message_data = await msg_response.json()
+                            return True, "Message sent successfully", {
+                                "message_id": message_data.get('id'),
+                                "channel_id": channel_id,
+                                "timestamp": message_data.get('timestamp'),
+                                "user_id": user_id
+                            }
+                        elif msg_response.status == 429:
+                            # 速率限制
+                            limit_data = await msg_response.json()
+                            retry_after = limit_data.get('retry_after', self.cooldown_period)
+                            return False, f"Rate limited. Try again in {retry_after} seconds", {
+                                "error_type": "rate_limited",
+                                "retry_after": retry_after
+                            }
+                        else:
+                            error_text = await msg_response.text()
+                            return False, f"Failed to send message: {error_text}", {
+                                "error_type": "message_send_failed",
+                                "status_code": msg_response.status
+                            }
         
-        return result["success"], result["status"], result["metadata"]
+        except Exception as e:
+            logger.error(f"Error in send_dm: {str(e)}")
+            return False, f"Error: {str(e)}", {"error_type": "exception", "error": str(e)}
     
     async def send_bulk_dms(self, template_id: str, user_ids: List[str], 
                             variables: Dict[str, str] = None,
