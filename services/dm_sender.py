@@ -399,7 +399,7 @@ class DMSender:
             logger.debug(traceback.format_exc())
             return False, error_msg, {"error_type": "unexpected_exception"}
 
- async def solve_discord_captcha(self, sitekey, rqdata, rqtoken):
+    async def solve_discord_captcha(self, sitekey, rqdata, rqtoken):
         """
         使用anti-captcha服务解决Discord验证码
         
