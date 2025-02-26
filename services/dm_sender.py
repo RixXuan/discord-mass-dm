@@ -116,11 +116,10 @@ class DMSender:
                 
                 # 增加超时时间，有时验证码需要更长时间解决
                 solver.set_soft_id(0)
-                timeout_secs = 120  # 增加到2分钟
                 
-                # 解决验证码
-                logger.info(f"Sending captcha to anti-captcha service with timeout {timeout_secs}s")
-                captcha_key = solver.solve_and_return_solution(timeout_secs)
+                # 解决验证码 - 注意这里不再传递timeout参数
+                logger.info("Sending captcha to anti-captcha service")
+                captcha_key = solver.solve_and_return_solution()
                 
                 if captcha_key != 0:
                     logger.info("Captcha successfully solved")
@@ -162,7 +161,6 @@ class DMSender:
                 await asyncio.sleep(2)  # 短暂等待后重试
         
         return None
-
 
     async def pre_authenticate_captcha(self, token):
         """
