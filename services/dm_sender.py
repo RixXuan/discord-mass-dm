@@ -103,21 +103,14 @@ class DMSender:
                 solver.set_website_url("https://discord.com")
                 solver.set_website_key(sitekey)
                 
-                # 设置额外的Discord特定数据
-                additional_data = {}
+                # 只设置rqdata，不设置rqtoken (根据错误信息，anti-captcha不支持rqtoken)
                 if rqdata:
-                    additional_data["rqdata"] = rqdata
+                    logger.info(f"Setting enterprise payload with rqdata")
+                    solver.set_enterprise_payload({
+                        "rqdata": rqdata
+                    })
                 
-                if rqtoken:
-                    additional_data["rqtoken"] = rqtoken
-                    
-                if additional_data:
-                    solver.set_enterprise_payload(additional_data)
-                
-                # 增加超时时间，有时验证码需要更长时间解决
-                solver.set_soft_id(0)
-                
-                # 解决验证码 - 注意这里不再传递timeout参数
+                # 解决验证码
                 logger.info("Sending captcha to anti-captcha service")
                 captcha_key = solver.solve_and_return_solution()
                 
