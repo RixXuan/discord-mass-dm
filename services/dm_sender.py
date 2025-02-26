@@ -126,7 +126,7 @@ class DMSender:
 
    
     async def send_dm(self, user_id: str, message: str, token: str) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
-    """Send a direct message to a Discord user using direct API call with enhanced human simulation."""
+        """Send a direct message to a Discord user using direct API call with enhanced human simulation."""
         
         logger.info(f"Preparing to send DM to user {user_id}")
         
