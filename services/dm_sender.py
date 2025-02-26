@@ -13,6 +13,8 @@ from typing import Dict, List, Optional, Any, Tuple, Set, Callable
 import discord
 from discord.ext import commands
 
+import aiohttp
+
 from core.token_manager import TokenManager
 from core.user_manager import UserManager
 from core.message_manager import MessageManager
