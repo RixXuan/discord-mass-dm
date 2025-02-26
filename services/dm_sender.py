@@ -131,9 +131,17 @@ class DMSender:
         """
         logger.info(f"Attempting to send DM to user {user_id} via API")
         
+       
         headers = {
             'Authorization': token,
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': 'https://discord.com/channels/@me',
+            'Origin': 'https://discord.com',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-origin'
         }
         
         try:
@@ -169,7 +177,8 @@ class DMSender:
                                 
                                 if captcha_key:
                                     logger.info("Retrying DM channel creation with solved captcha")
-                                    
+
+                                    await asyncio.sleep(random.uniform(3.5, 7.2))
                                     # 更新头信息，添加验证码解决方案
                                     headers["X-Captcha-Key"] = captcha_key
                                     
