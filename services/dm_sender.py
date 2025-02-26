@@ -77,160 +77,86 @@ class DMSender:
         
         logger.debug("DMSender initialized")
 
-
-    async def solve_discord_captcha(self, sitekey, rqdata, rqtoken):
-        """
-        使用anti-captcha服务解决Discord验证码
-        
-        Args:
-            sitekey (str): hCaptcha的站点密钥
-            rqdata (str): 验证码请求数据
-            rqtoken (str): 验证码请求令牌
-                
-        Returns:
-            str: 解决的验证码密钥或None如果失败
-        """
-        logger.info("Attempting to solve captcha using anti-captcha service")
-        
-        # 将异步操作包装在一个同步函数中，然后从事件循环中调用
-        def solve_captcha_sync():
-            try:
-                # 初始化anti-captcha解算器
-                solver = hCaptchaProxyless()
-                solver.set_verbose(1)
-                # 替换为你的anti-captcha API密钥
-                solver.set_key("cca119e5e56cd8ad322a21280be38146")
-                solver.set_website_url("https://discord.com")
-                solver.set_website_key(sitekey)
-                
-                # 只设置rqdata，不设置rqtoken (根据错误信息，anti-captcha不支持rqtoken)
-                if rqdata:
-                    logger.info(f"Setting enterprise payload with rqdata")
-                    solver.set_enterprise_payload({
-                        "rqdata": rqdata
-                    })
-                
-                # 解决验证码
-                logger.info("Sending captcha to anti-captcha service")
-                captcha_key = solver.solve_and_return_solution()
-                
-                if captcha_key != 0:
-                    logger.info("Captcha successfully solved")
-                    return captcha_key
-                else:
-                    logger.error(f"Error solving captcha: {solver.error_code}")
-                    return None
-                    
-            except Exception as e:
-                logger.error(f"Exception during captcha solving: {e}")
-                import traceback
-                logger.debug(traceback.format_exc())
-                return None
-        
-        # 添加重试逻辑
-        max_captcha_retries = 2
-        for retry in range(max_captcha_retries):
-            try:
-                # 在事件循环的执行器中运行同步任务
-                loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(None, solve_captcha_sync)
-                
-                if result:
-                    return result
-                
-                logger.warning(f"Captcha solving failed, retry {retry+1}/{max_captcha_retries}")
-                await asyncio.sleep(2)  # 短暂等待后重试
-                
-            except Exception as e:
-                logger.error(f"Error in solve_discord_captcha: {e}")
-                import traceback
-                logger.debug(traceback.format_exc())
-                
-                # 最后一次重试失败
-                if retry == max_captcha_retries - 1:
-                    logger.error("All captcha solving attempts failed")
-                    return None
-                
-                await asyncio.sleep(2)  # 短暂等待后重试
-        
-        return None
-
-    async def pre_authenticate_captcha(self, token):
-        """
-        预先验证验证码解决方案
-        
-        有时Discord会连续要求多个验证码。这个方法尝试预先解决验证码，
-        这样我们就有一个准备好的解决方案，可以重复使用
-        
-        Args:
-            token (str): Discord令牌
-                
-        Returns:
-            tuple: (成功标志, 验证码解决方案, 错误消息)
-        """
-        logger.info("Attempting to pre-authenticate captcha")
-        
-        headers = {
-            'Authorization': token,
-            'Content-Type': 'application/json',
-            'User-Agent': f'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{random.randint(100, 115)}.0.0.0 Safari/537.36',
-        }
+    async def _view_user_profile(self, session, user_id):
+        """查看用户个人资料，模拟正常行为"""
+        try:
+            profile_url = f'https://discord.com/api/v9/users/{user_id}/profile'
+            logger.info(f"Simulating human activity by accessing {profile_url}")
+            async with session.get(profile_url) as resp:
+                logger.debug(f"Profile access status: {resp.status}")
+            return True
+        except Exception as e:
+            logger.debug(f"Error during profile access: {e}")
+            return False
+            
+    async def _check_user_settings(self, session):
+        """检查用户设置，模拟正常行为"""
+        try:
+            settings_url = 'https://discord.com/api/v9/users/@me/settings'
+            logger.info(f"Simulating human activity by accessing user settings")
+            async with session.get(settings_url) as resp:
+                logger.debug(f"Settings access status: {resp.status}")
+            return True
+        except Exception as e:
+            logger.debug(f"Error during settings access: {e}")
+            return False
+            
+    async def _view_user_guilds(self, session):
+        """查看用户服务器列表，模拟正常行为"""
+        try:
+            guilds_url = 'https://discord.com/api/v9/users/@me/guilds'
+            logger.info(f"Simulating human activity by accessing guilds")
+            async with session.get(guilds_url) as resp:
+                logger.debug(f"Guilds access status: {resp.status}")
+            return True
+        except Exception as e:
+            logger.debug(f"Error during guilds access: {e}")
+            return False
+            
+    async def _check_notifications(self, session):
+        """检查通知，模拟正常行为"""
+        try:
+            notif_url = 'https://discord.com/api/v9/users/@me/mentions'
+            logger.info(f"Simulating human activity by checking notifications")
+            async with session.get(notif_url) as resp:
+                logger.debug(f"Notifications access status: {resp.status}")
+            return True
+        except Exception as e:
+            logger.debug(f"Error during notifications check: {e}")
+            return False
+            
+    async def _create_dm_channel(self, session, user_id):
+        """创建DM通道"""
+        create_dm_url = 'https://discord.com/api/v9/users/@me/channels'
+        create_dm_payload = {'recipient_id': user_id}
         
         try:
-            async with aiohttp.ClientSession(headers=headers) as session:
-                # 访问一个需要验证的端点
-                async with session.get('https://discord.com/api/v9/users/@me/settings') as response:
-                    if response.status == 200:
-                        logger.info("No captcha needed for pre-authentication")
-                        return True, None, "No captcha needed"
-                    
-                    # 检查是否需要验证码
+            logger.info("Creating DM channel (attempt 1)")
+            async with session.post(create_dm_url, json=create_dm_payload) as response:
+                if response.status == 200 or response.status == 201:
                     response_text = await response.text()
                     try:
-                        response_json = json.loads(response_text)
-                        if "captcha_key" in response_json:
-                            # 提取验证码数据
-                            captcha_sitekey = response_json.get("captcha_sitekey")
-                            captcha_rqdata = response_json.get("captcha_rqdata")
-                            captcha_rqtoken = response_json.get("captcha_rqtoken")
-                            
-                            logger.info(f"Captcha required during pre-authentication, sitekey: {captcha_sitekey}")
-                            
-                            # 解决验证码
-                            captcha_key = await self.solve_discord_captcha(
-                                captcha_sitekey, captcha_rqdata, captcha_rqtoken
-                            )
-                            
-                            if captcha_key:
-                                logger.info("Pre-authentication captcha solved successfully")
-                                
-                                # 尝试验证解决方案
-                                headers["X-Captcha-Key"] = captcha_key
-                                
-                                # 重新尝试请求
-                                async with session.get('https://discord.com/api/v9/users/@me/settings', 
-                                                    headers=headers) as verify_resp:
-                                    if verify_resp.status == 200:
-                                        logger.info("Captcha solution successfully verified")
-                                        return True, captcha_key, "Captcha solved and verified"
-                                    else:
-                                        logger.warning("Captcha solution failed verification")
-                                        return False, None, "Captcha solution verification failed"
-                            else:
-                                logger.error("Failed to solve pre-authentication captcha")
-                                return False, None, "Failed to solve captcha"
-                        else:
-                            # 其他错误
-                            error_message = response_json.get("message", "Unknown error")
-                            logger.warning(f"Pre-authentication error: {error_message}")
-                            return False, None, f"API error: {error_message}"
+                        channel_data = json.loads(response_text)
+                        channel_id = channel_data.get('id')
+                        if channel_id:
+                            logger.info(f"Successfully created DM channel: {channel_id}")
+                            return channel_data, channel_id
                     except json.JSONDecodeError:
-                        logger.error(f"Invalid JSON in pre-authentication response: {response_text}")
-                        return False, None, "Invalid JSON response"
-        except Exception as e:
-            logger.error(f"Exception during pre-authentication: {e}")
-            return False, None, f"Connection error: {str(e)}"
-
+                        pass
+                        
+                return None, None
+        except Exception:
+            return None, None
+            
+    async def _send_typing_indicator(self, session, channel_id):
+        """发送正在输入指示器"""
+        try:
+            typing_url = f'https://discord.com/api/v9/channels/{channel_id}/typing'
+            async with session.post(typing_url) as typing_resp:
+                return typing_resp.status == 200 or typing_resp.status == 204
+        except Exception:
+            return False
+    
     async def send_dm(self, user_id: str, message: str, token: str) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
         """Send a direct message to a Discord user with enhanced anti-detection and captcha handling."""
         
@@ -472,87 +398,159 @@ class DMSender:
             import traceback
             logger.debug(traceback.format_exc())
             return False, error_msg, {"error_type": "unexpected_exception"}
-            
-        # 辅助方法
-        async def _view_user_profile(self, session, user_id):
-            """查看用户个人资料，模拟正常行为"""
-            try:
-                profile_url = f'https://discord.com/api/v9/users/{user_id}/profile'
-                logger.info(f"Simulating human activity by accessing {profile_url}")
-                async with session.get(profile_url) as resp:
-                    logger.debug(f"Profile access status: {resp.status}")
-                return True
-            except Exception as e:
-                logger.debug(f"Error during profile access: {e}")
-                return False
+
+ async def solve_discord_captcha(self, sitekey, rqdata, rqtoken):
+        """
+        使用anti-captcha服务解决Discord验证码
+        
+        Args:
+            sitekey (str): hCaptcha的站点密钥
+            rqdata (str): 验证码请求数据
+            rqtoken (str): 验证码请求令牌
                 
-        async def _check_user_settings(self, session):
-            """检查用户设置，模拟正常行为"""
+        Returns:
+            str: 解决的验证码密钥或None如果失败
+        """
+        logger.info("Attempting to solve captcha using anti-captcha service")
+        
+        # 将异步操作包装在一个同步函数中，然后从事件循环中调用
+        def solve_captcha_sync():
             try:
-                settings_url = 'https://discord.com/api/v9/users/@me/settings'
-                logger.info(f"Simulating human activity by accessing user settings")
-                async with session.get(settings_url) as resp:
-                    logger.debug(f"Settings access status: {resp.status}")
-                return True
-            except Exception as e:
-                logger.debug(f"Error during settings access: {e}")
-                return False
+                # 初始化anti-captcha解算器
+                solver = hCaptchaProxyless()
+                solver.set_verbose(1)
+                # 替换为你的anti-captcha API密钥
+                solver.set_key("cca119e5e56cd8ad322a21280be38146")
+                solver.set_website_url("https://discord.com")
+                solver.set_website_key(sitekey)
                 
-        async def _view_user_guilds(self, session):
-            """查看用户服务器列表，模拟正常行为"""
-            try:
-                guilds_url = 'https://discord.com/api/v9/users/@me/guilds'
-                logger.info(f"Simulating human activity by accessing guilds")
-                async with session.get(guilds_url) as resp:
-                    logger.debug(f"Guilds access status: {resp.status}")
-                return True
-            except Exception as e:
-                logger.debug(f"Error during guilds access: {e}")
-                return False
+                # 只设置rqdata，不设置rqtoken (根据错误信息，anti-captcha不支持rqtoken)
+                if rqdata:
+                    logger.info(f"Setting enterprise payload with rqdata")
+                    solver.set_enterprise_payload({
+                        "rqdata": rqdata
+                    })
                 
-        async def _check_notifications(self, session):
-            """检查通知，模拟正常行为"""
-            try:
-                notif_url = 'https://discord.com/api/v9/users/@me/mentions'
-                logger.info(f"Simulating human activity by checking notifications")
-                async with session.get(notif_url) as resp:
-                    logger.debug(f"Notifications access status: {resp.status}")
-                return True
-            except Exception as e:
-                logger.debug(f"Error during notifications check: {e}")
-                return False
+                # 解决验证码
+                logger.info("Sending captcha to anti-captcha service")
+                captcha_key = solver.solve_and_return_solution()
                 
-        async def _create_dm_channel(self, session, user_id):
-            """创建DM通道"""
-            create_dm_url = 'https://discord.com/api/v9/users/@me/channels'
-            create_dm_payload = {'recipient_id': user_id}
-            
+                if captcha_key != 0:
+                    logger.info("Captcha successfully solved")
+                    return captcha_key
+                else:
+                    logger.error(f"Error solving captcha: {solver.error_code}")
+                    return None
+                    
+            except Exception as e:
+                logger.error(f"Exception during captcha solving: {e}")
+                import traceback
+                logger.debug(traceback.format_exc())
+                return None
+        
+        # 添加重试逻辑
+        max_captcha_retries = 2
+        for retry in range(max_captcha_retries):
             try:
-                logger.info("Creating DM channel (attempt 1)")
-                async with session.post(create_dm_url, json=create_dm_payload) as response:
-                    if response.status == 200 or response.status == 201:
-                        response_text = await response.text()
-                        try:
-                            channel_data = json.loads(response_text)
-                            channel_id = channel_data.get('id')
-                            if channel_id:
-                                logger.info(f"Successfully created DM channel: {channel_id}")
-                                return channel_data, channel_id
-                        except json.JSONDecodeError:
-                            pass
+                # 在事件循环的执行器中运行同步任务
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(None, solve_captcha_sync)
+                
+                if result:
+                    return result
+                
+                logger.warning(f"Captcha solving failed, retry {retry+1}/{max_captcha_retries}")
+                await asyncio.sleep(2)  # 短暂等待后重试
+                
+            except Exception as e:
+                logger.error(f"Error in solve_discord_captcha: {e}")
+                import traceback
+                logger.debug(traceback.format_exc())
+                
+                # 最后一次重试失败
+                if retry == max_captcha_retries - 1:
+                    logger.error("All captcha solving attempts failed")
+                    return None
+                
+                await asyncio.sleep(2)  # 短暂等待后重试
+        
+        return None
+
+    async def pre_authenticate_captcha(self, token):
+        """
+        预先验证验证码解决方案
+        
+        有时Discord会连续要求多个验证码。这个方法尝试预先解决验证码，
+        这样我们就有一个准备好的解决方案，可以重复使用
+        
+        Args:
+            token (str): Discord令牌
+                
+        Returns:
+            tuple: (成功标志, 验证码解决方案, 错误消息)
+        """
+        logger.info("Attempting to pre-authenticate captcha")
+        
+        headers = {
+            'Authorization': token,
+            'Content-Type': 'application/json',
+            'User-Agent': f'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{random.randint(100, 115)}.0.0.0 Safari/537.36',
+        }
+        
+        try:
+            async with aiohttp.ClientSession(headers=headers) as session:
+                # 访问一个需要验证的端点
+                async with session.get('https://discord.com/api/v9/users/@me/settings') as response:
+                    if response.status == 200:
+                        logger.info("No captcha needed for pre-authentication")
+                        return True, None, "No captcha needed"
+                    
+                    # 检查是否需要验证码
+                    response_text = await response.text()
+                    try:
+                        response_json = json.loads(response_text)
+                        if "captcha_key" in response_json:
+                            # 提取验证码数据
+                            captcha_sitekey = response_json.get("captcha_sitekey")
+                            captcha_rqdata = response_json.get("captcha_rqdata")
+                            captcha_rqtoken = response_json.get("captcha_rqtoken")
                             
-                    return None, None
-            except Exception:
-                return None, None
-                
-        async def _send_typing_indicator(self, session, channel_id):
-            """发送正在输入指示器"""
-            try:
-                typing_url = f'https://discord.com/api/v9/channels/{channel_id}/typing'
-                async with session.post(typing_url) as typing_resp:
-                    return typing_resp.status == 200 or typing_resp.status == 204
-            except Exception:
-                return False
+                            logger.info(f"Captcha required during pre-authentication, sitekey: {captcha_sitekey}")
+                            
+                            # 解决验证码
+                            captcha_key = await self.solve_discord_captcha(
+                                captcha_sitekey, captcha_rqdata, captcha_rqtoken
+                            )
+                            
+                            if captcha_key:
+                                logger.info("Pre-authentication captcha solved successfully")
+                                
+                                # 尝试验证解决方案
+                                headers["X-Captcha-Key"] = captcha_key
+                                
+                                # 重新尝试请求
+                                async with session.get('https://discord.com/api/v9/users/@me/settings', 
+                                                    headers=headers) as verify_resp:
+                                    if verify_resp.status == 200:
+                                        logger.info("Captcha solution successfully verified")
+                                        return True, captcha_key, "Captcha solved and verified"
+                                    else:
+                                        logger.warning("Captcha solution failed verification")
+                                        return False, None, "Captcha solution verification failed"
+                            else:
+                                logger.error("Failed to solve pre-authentication captcha")
+                                return False, None, "Failed to solve captcha"
+                        else:
+                            # 其他错误
+                            error_message = response_json.get("message", "Unknown error")
+                            logger.warning(f"Pre-authentication error: {error_message}")
+                            return False, None, f"API error: {error_message}"
+                    except json.JSONDecodeError:
+                        logger.error(f"Invalid JSON in pre-authentication response: {response_text}")
+                        return False, None, "Invalid JSON response"
+        except Exception as e:
+            logger.error(f"Exception during pre-authentication: {e}")
+            return False, None, f"Connection error: {str(e)}"
 
     async def send_bulk_dms(self, template_id: str, user_ids: List[str], 
                             variables: Dict[str, str] = None,
