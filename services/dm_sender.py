@@ -232,378 +232,327 @@ class DMSender:
             return False, None, f"Connection error: {str(e)}"
 
     async def send_dm(self, user_id: str, message: str, token: str) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
-        """Send a direct message to a Discord user using direct API call with enhanced human simulation."""
+        """Send a direct message to a Discord user with enhanced anti-detection and captcha handling."""
         
         logger.info(f"Preparing to send DM to user {user_id}")
         
-        # 生成更真实的请求头
+        # 生成随机的请求标识符
         chrome_version = random.randint(100, 120)
         build_number = random.randint(180000, 200000)
-        random_fingerprint = ''.join(random.choices('0123456789abcdef', k=32))
         
-        # 更真实的请求头，包含所有Discord客户端会发送的头信息
+        # 尝试从缓存中检索验证码解决方案
+        captcha_solution = self.token_manager.get_cached_captcha_solution(token) if hasattr(self, 'token_manager') else None
+        
+        # 更真实的请求头，模拟正常的Discord客户端
         headers = {
             'Authorization': token,
             'Content-Type': 'application/json',
             'User-Agent': f'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{chrome_version}.0.0.0 Safari/537.36',
             'Accept': '*/*',
             'Accept-Language': 'en-US,en;q=0.9',
-            'Accept-Encoding': 'gzip, deflate, br',
             'Referer': 'https://discord.com/channels/@me',
             'Origin': 'https://discord.com',
-            'Sec-Fetch-Dest': 'empty',
-            'Sec-Fetch-Mode': 'cors',
-            'Sec-Fetch-Site': 'same-origin',
-            'Connection': 'keep-alive',
-            'DNT': '1',
-            'X-Debug-Options': 'bugReporterEnabled',
-            'X-Discord-Locale': random.choice(['en-US', 'en-GB', 'fr', 'de', 'pt-BR']),
-            'X-Discord-Timezone': random.choice(['America/New_York', 'Europe/London', 'Asia/Tokyo', 'Australia/Sydney']),
             'X-Super-Properties': f'eyJvcyI6IldpbmRvd3MiLCJicm93c2VyIjoiQ2hyb21lIiwiZGV2aWNlIjoiIiwic3lzdGVtX2xvY2FsZSI6ImVuLVVTIiwiYnJvd3Nlcl91c2VyX2FnZW50IjoiTW96aWxsYS81LjAgKFdpbmRvd3MgTlQgMTAuMDsgV2luNjQ7IHg2NCkgQXBwbGVXZWJLaXQvNTM3LjM2IChLSFRNTCwgbGlrZSBHZWNrbykgQ2hyb21lLzExMC4wLjAuMCBTYWZhcmkvNTM3LjM2IiwiYnJvd3Nlcl92ZXJzaW9uIjoiMTEwLjAuMC4wIiwib3NfdmVyc2lvbiI6IjEwIiwicmVmZXJyZXIiOiIiLCJyZWZlcnJpbmdfZG9tYWluIjoiIiwicmVmZXJyZXJfY3VycmVudCI6IiIsInJlZmVycmluZ19kb21haW5fY3VycmVudCI6IiIsInJlbGVhc2VfY2hhbm5lbCI6InN0YWJsZSIsImNsaWVudF9idWlsZF9udW1iZXIiOntidWlsZF9udW1iZXJ9LCJjbGllbnRfZXZlbnRfc291cmNlIjpudWxsfQ==',
-            'X-Fingerprint': random_fingerprint,
-            'Cookie': f'__dcfduid={random.randint(100000, 999999)}; __sdcfduid={random.randint(100000, 999999)}; locale={random.choice(["en-US", "en-GB", "fr", "de"])}; __cf_bm={random_fingerprint}'
         }
         
-        # 获取一个随机会话ID
-        session_id = ''.join(random.choices('0123456789abcdef', k=32))
+        # 如果我们有缓存的验证码解决方案，添加到请求头
+        if captcha_solution:
+            headers["X-Captcha-Key"] = captcha_solution
+            logger.info("Using cached captcha solution")
         
-        # 在多次请求之间重用一个会话以保持一致性
-        async with aiohttp.ClientSession(headers=headers) as session:
-            # 实现验证码解决状态追踪
-            captcha_already_solved = False
-            captcha_solution = None
+        try:
+            # 每个帐户的Cookie应该是唯一的
+            cookies = {
+                'locale': 'en-US',
+                '__dcfduid': f'{random.randint(100000, 999999)}',
+                '__sdcfduid': f'{random.randint(100000, 999999)}'
+            }
             
-            try:
-                # 步骤1: 随机性的第三方服务器调用 - 模拟人类行为链
-                # Discord客户端通常会调用多个API端点，我们随机选择一些进行调用
-                # 这些调用有助于建立更可信的API调用模式
+            async with aiohttp.ClientSession(headers=headers, cookies=cookies) as session:
+                # 第1步: 降低检测风险 - 执行一系列正常的Discord操作
+                # 这模拟了用户在发送DM前的正常浏览行为
                 
-                human_simulation_endpoints = [
-                    # 大多数人在发送DM前会先查看一些内容
-                    'https://discord.com/api/v9/users/@me/library',
-                    'https://discord.com/api/v9/users/@me/settings',
-                    'https://discord.com/api/v9/users/@me/guilds',
-                    f'https://discord.com/api/v9/users/{user_id}/profile',
-                    'https://discord.com/api/v9/experiments'
+                # 根据随机选择执行1-2个常规操作
+                normal_operations = [
+                    lambda: self._view_user_profile(session, user_id),
+                    lambda: self._check_user_settings(session),
+                    lambda: self._view_user_guilds(session),
+                    lambda: self._check_notifications(session)
                 ]
                 
-                # 随机选择1-2个端点访问，看起来更像人类行为
-                selected_endpoints = random.sample(human_simulation_endpoints, 
-                                                k=min(random.randint(1, 2), 
-                                                    len(human_simulation_endpoints)))
+                # 随机选择1-2个操作执行
+                selected_ops = random.sample(normal_operations, k=min(2, len(normal_operations)))
+                for op in selected_ops:
+                    await op()
+                    # 在操作之间等待一会儿
+                    await asyncio.sleep(random.uniform(0.5, 1.0))
                 
-                for endpoint in selected_endpoints:
-                    try:
-                        logger.info(f"Simulating human activity by accessing {endpoint}")
-                        async with session.get(endpoint) as resp:
-                            # 我们不关心响应，只是建立可信的访问模式
-                            logger.debug(f"Human simulation call status: {resp.status}")
-                        # 短暂延迟，就像人类在不同页面间浏览一样
-                        await asyncio.sleep(random.uniform(0.5, 1.2))
-                    except Exception as e:
-                        logger.debug(f"Error during human simulation (continuing anyway): {str(e)}")
-                
-                # 步骤2: 创建DM通道
-                create_dm_url = 'https://discord.com/api/v9/users/@me/channels'
-                create_dm_payload = {
-                    'recipient_id': user_id,
-                    # 添加额外字段使请求看起来更真实
-                    '_trace': [f"discord.{random.randint(1000, 9999)}", f"{session_id}"]
-                }
-                
-                channel_id = None
-                channel_data = None
-                
-                # 验证码处理循环 - 创建DM通道
-                max_captcha_retries = 3
-                for captcha_retry in range(max_captcha_retries):
-                    if captcha_already_solved:
-                        headers["X-Captcha-Key"] = captcha_solution
-                    
-                    try:
-                        logger.info(f"Creating DM channel (attempt {captcha_retry+1})")
-                        
-                        # 添加一些随机参数，看起来更像真实请求
-                        request_time = int(time.time() * 1000)
-                        
-                        # 添加一个随机查询参数以防止缓存
-                        query_params = {
-                            'timestamp': request_time
-                        }
-                        
-                        async with session.post(
-                            create_dm_url, 
-                            params=query_params,
-                            json=create_dm_payload
-                        ) as response:
-                            response_status = response.status
-                            response_text = await response.text()
-                            
-                            # 解析响应
-                            if response_status == 200 or response_status == 201:
-                                try:
-                                    channel_data = json.loads(response_text) if response_text else {}
-                                    channel_id = channel_data.get('id')
-                                    if channel_id:
-                                        logger.info(f"Successfully created DM channel: {channel_id}")
-                                        break  # 成功创建，跳出循环
-                                    else:
-                                        logger.error("Channel ID not found in response")
-                                        return False, "Could not get DM channel ID", {"error_type": "no_channel_id"}
-                                except json.JSONDecodeError:
-                                    logger.error(f"JSON parse error for channel data: {response_text}")
-                                    return False, "JSON parse error for channel data", {"error_type": "json_error"}
-                            else:
-                                # 处理验证码或其他错误
-                                try:
-                                    response_json = json.loads(response_text) if response_text else {}
-                                    logger.debug(f"Channel creation error: {response_json}")
-                                    
-                                    # 检查是否需要验证码
-                                    if ("captcha_key" in response_json and 
-                                    ("captcha-required" in str(response_json.get("captcha_key", "")) or 
-                                        "captcha_required" in str(response_json))):
-                                        
-                                        # 提取验证码数据
-                                        captcha_sitekey = response_json.get("captcha_sitekey")
-                                        captcha_rqdata = response_json.get("captcha_rqdata")
-                                        captcha_rqtoken = response_json.get("captcha_rqtoken")
-                                        captcha_service = response_json.get("captcha_service", "hcaptcha")
-                                        
-                                        logger.info(f"Captcha required (service: {captcha_service})")
-                                        
-                                        if captcha_sitekey:
-                                            logger.info(f"Attempting to solve captcha with sitekey: {captcha_sitekey}")
-                                            captcha_solution = await self.solve_discord_captcha(
-                                                captcha_sitekey, captcha_rqdata, captcha_rqtoken
-                                            )
-                                            
-                                            if captcha_solution:
-                                                logger.info("Captcha solved successfully")
-                                                captcha_already_solved = True
-                                                
-                                                # 将验证码解决方案添加到请求头
-                                                headers["X-Captcha-Key"] = captcha_solution
-                                                
-                                                # 模拟人类短暂思考
-                                                await asyncio.sleep(random.uniform(0.5, 1.5))
-                                                
-                                                # 继续下一次创建尝试
-                                                continue
-                                            else:
-                                                logger.error("Failed to solve captcha")
-                                                return False, "Failed to solve captcha", {"error_type": "captcha_solving_failed"}
-                                        else:
-                                            logger.error("Captcha required but no sitekey provided")
-                                            return False, "Captcha required but missing sitekey", {"error_type": "missing_captcha_data"}
-                                    
-                                    # 处理其他类型的错误
-                                    elif "message" in response_json:
-                                        error_message = response_json.get("message", "Unknown error")
-                                        logger.error(f"Discord API error: {error_message}")
-                                        # 针对特定错误的处理
-                                        if "rate limited" in error_message.lower():
-                                            retry_after = response_json.get("retry_after", 5)
-                                            logger.info(f"Rate limited. Retry after {retry_after}s")
-                                            return False, f"Rate limited: {error_message}", {
-                                                "error_type": "rate_limited", 
-                                                "retry_after": retry_after
-                                            }
-                                        else:
-                                            return False, f"API error: {error_message}", {
-                                                "error_type": "api_error",
-                                                "message": error_message
-                                            }
-                                    else:
-                                        return False, f"Failed to create DM channel: {response_text}", {
-                                            "error_type": "unknown_error", 
-                                            "status": response_status
-                                        }
-                                except json.JSONDecodeError:
-                                    logger.error(f"Invalid JSON in error response: {response_text}")
-                                    return False, f"Invalid response from Discord API", {
-                                        "error_type": "invalid_response", 
-                                        "status": response_status
-                                    }
-                    except Exception as e:
-                        logger.error(f"Exception during channel creation: {str(e)}")
-                        return False, f"Connection error: {str(e)}", {"error_type": "connection_error"}
-                
-                # 验证是否成功获取了channel_id
+                # 第2步: 创建DM通道
+                channel_data, channel_id = await self._create_dm_channel(session, user_id)
                 if not channel_id:
-                    logger.error("Failed to create DM channel after multiple attempts")
-                    return False, "Failed to create DM channel after retries", {"error_type": "channel_creation_failed"}
+                    return False, "Failed to create DM channel", {"error_type": "channel_creation_failed"}
                 
-                # 步骤3: 模拟消息准备和发送
-                # 随机等待一小段时间，就像用户在思考消息一样
-                thinking_time = random.uniform(0.8, 2.5)
-                logger.info(f"Simulating message composition for {thinking_time}s")
-                await asyncio.sleep(thinking_time)
+                # 第3步: 发送消息，处理验证码
+                # 添加强化的验证码跟踪
+                captcha_retry_count = 0
+                captcha_solutions_tried = set()  # 跟踪已尝试的验证码解决方案
+                max_captcha_retries = 3  # 最多尝试3次验证码
+                
+                # 模拟消息撰写
+                await asyncio.sleep(random.uniform(0.8, 1.5))
                 
                 # 发送typing指示器
-                typing_url = f'https://discord.com/api/v9/channels/{channel_id}/typing'
+                typing_success = await self._send_typing_indicator(session, channel_id)
                 
-                # 根据消息长度计算适当的打字时间
-                message_length = len(message)
-                typing_speed = random.uniform(5.0, 12.0)  # 每秒字符数
-                typing_time = min(message_length / typing_speed, 5.0)  # 最多5秒
-                
-                # 分多次发送typing指示器，看起来更自然
-                typing_intervals = max(min(int(typing_time / 2) + 1, 3), 1)  # 1-3次
-                
-                for i in range(typing_intervals):
-                    try:
-                        async with session.post(typing_url) as typing_resp:
-                            logger.debug(f"Typing indicator {i+1}/{typing_intervals}: {typing_resp.status}")
-                        
-                        interval_time = typing_time / typing_intervals
-                        await asyncio.sleep(interval_time)
-                    except Exception as e:
-                        logger.debug(f"Error sending typing indicator (continuing): {str(e)}")
-                
-                # 构建消息payload
-                message_nonce = str(int(time.time() * 1000)) + str(random.randint(1000, 9999))
-                
+                # 第4步: 构建消息payload
+                message_nonce = str(int(time.time() * 1000))
                 message_payload = {
                     'content': message,
                     'nonce': message_nonce,
-                    'tts': False,
-                    'flags': 0,
-                    # 添加一些其他Discord客户端会发送的字段
-                    'message_reference': None,
-                    'allowed_mentions': {"parse": ["users", "roles", "everyone"], "replied_user": True},
-                    'sticker_ids': []
+                    'tts': False
                 }
                 
-                # 发送消息
-                send_message_url = f'https://discord.com/api/v9/channels/{channel_id}/messages'
+                # 解决验证码循环检测
+                same_captcha_count = 0  # 跟踪同一个验证码出现的次数
+                last_captcha_sitekey = None  # 上一个验证码的sitekey
                 
-                # 验证码处理循环 - 发送消息
-                for msg_captcha_retry in range(max_captcha_retries):
-                    if captcha_already_solved:
-                        headers["X-Captcha-Key"] = captcha_solution
+                # 发送消息尝试循环
+                for attempt in range(5):  # 最多尝试5次
+                    send_message_url = f'https://discord.com/api/v9/channels/{channel_id}/messages'
                     
                     try:
-                        logger.info(f"Sending message (attempt {msg_captcha_retry+1})")
+                        logger.info(f"Sending message (attempt {attempt+1})")
                         
-                        async with session.post(send_message_url, json=message_payload) as msg_response:
-                            msg_status = msg_response.status
-                            msg_text = await msg_response.text()
+                        # 如果有缓存的验证码，添加到头部
+                        if captcha_solution and "X-Captcha-Key" not in headers:
+                            headers["X-Captcha-Key"] = captcha_solution
+                        
+                        async with session.post(send_message_url, json=message_payload) as response:
+                            status = response.status
+                            response_text = await response.text()
                             
-                            # 处理成功情况
-                            if msg_status == 200 or msg_status == 201:
+                            # 成功发送
+                            if status == 200 or status == 201:
                                 try:
-                                    msg_data = json.loads(msg_text) if msg_text else {}
-                                    logger.info(f"Message sent successfully: ID {msg_data.get('id', 'unknown')}")
+                                    message_data = json.loads(response_text)
+                                    logger.info(f"Message sent successfully: ID {message_data.get('id', 'unknown')}")
+                                    
+                                    # 缓存成功的验证码解决方案，如果它帮助我们通过了
+                                    if captcha_solution and hasattr(self, 'token_manager'):
+                                        self.token_manager.cache_captcha_solution(token, captcha_solution)
                                     
                                     return True, "Message sent successfully", {
-                                        "message_id": msg_data.get('id'),
+                                        "message_id": message_data.get('id'),
                                         "channel_id": channel_id,
-                                        "timestamp": msg_data.get('timestamp'),
-                                        "user_id": user_id
+                                        "timestamp": message_data.get('timestamp')
                                     }
                                 except json.JSONDecodeError:
-                                    # 状态码表示成功但无法解析响应
+                                    # JSON解析失败但状态码是成功的
                                     logger.info("Message sent successfully (no parseable data)")
                                     return True, "Message sent successfully", {
-                                        "channel_id": channel_id,
-                                        "user_id": user_id
+                                        "channel_id": channel_id
                                     }
                             
-                            # 处理错误情况
-                            else:
-                                try:
-                                    error_json = json.loads(msg_text) if msg_text else {}
-                                    logger.debug(f"Message send error: {error_json}")
+                            # 处理需要验证码的情况
+                            try:
+                                response_json = json.loads(response_text)
+                                
+                                # 检查是否需要验证码
+                                if "captcha_key" in response_json or "captcha_sitekey" in response_json:
+                                    captcha_sitekey = response_json.get("captcha_sitekey")
+                                    captcha_rqdata = response_json.get("captcha_rqdata")
                                     
-                                    # 检查是否需要验证码
-                                    if ("captcha_key" in error_json and 
-                                    ("captcha-required" in str(error_json.get("captcha_key", "")) or 
-                                        "captcha_required" in str(error_json))):
+                                    # 检测无限验证码循环
+                                    if captcha_sitekey == last_captcha_sitekey:
+                                        same_captcha_count += 1
+                                        logger.warning(f"Same captcha detected {same_captcha_count} times in a row")
                                         
-                                        # 验证码数据提取
-                                        captcha_sitekey = error_json.get("captcha_sitekey")
-                                        captcha_rqdata = error_json.get("captcha_rqdata")
-                                        captcha_rqtoken = error_json.get("captcha_rqtoken")
-                                        captcha_service = error_json.get("captcha_service", "hcaptcha")
-                                        
-                                        logger.info(f"Message captcha required (service: {captcha_service})")
-                                        
-                                        if captcha_sitekey:
-                                            logger.info(f"Attempting to solve message captcha: {captcha_sitekey}")
-                                            captcha_solution = await self.solve_discord_captcha(
-                                                captcha_sitekey, captcha_rqdata, captcha_rqtoken
-                                            )
+                                        if same_captcha_count >= 2:
+                                            logger.error("Detected infinite captcha loop - Discord may have flagged this token")
+                                            # 尝试最终的解决方案 - 延迟后带上所有可能的头部再试一次
+                                            await asyncio.sleep(5)  # 等待5秒
                                             
-                                            if captcha_solution:
-                                                logger.info("Message captcha solved successfully")
-                                                captcha_already_solved = True
-                                                
-                                                # 添加验证码到头部
-                                                headers["X-Captcha-Key"] = captcha_solution
-                                                
-                                                # 模拟人类短暂思考
-                                                await asyncio.sleep(random.uniform(0.5, 1.0))
-                                                
-                                                # 继续下一次尝试
-                                                continue
-                                            else:
-                                                logger.error("Failed to solve message captcha")
-                                                return False, "Failed to solve message captcha", {"error_type": "message_captcha_failed"}
-                                        else:
-                                            logger.error("Message captcha required but no sitekey provided")
-                                            return False, "Message captcha required but missing sitekey", {"error_type": "missing_message_captcha_data"}
-                                    
-                                    # 处理速率限制
-                                    elif "retry_after" in error_json:
-                                        retry_after = error_json.get("retry_after", 5)
-                                        logger.warning(f"Rate limited. Retry after {retry_after}s")
-                                        return False, f"Rate limited when sending message", {
-                                            "error_type": "rate_limited",
-                                            "retry_after": retry_after
-                                        }
-                                    
-                                    # 处理其他API错误
-                                    elif "message" in error_json:
-                                        error_message = error_json.get("message", "Unknown error")
-                                        logger.error(f"Message send API error: {error_message}")
-                                        
-                                        # 检查错误原因
-                                        if "cannot send messages to this user" in error_message.lower():
-                                            return False, "Cannot send messages to this user", {"error_type": "user_blocked_dms"}
-                                        else:
-                                            return False, f"Message API error: {error_message}", {
-                                                "error_type": "message_api_error",
-                                                "message": error_message
+                                            # 增强头部，尝试击败验证码循环
+                                            headers["X-Captcha-Key"] = captcha_solution
+                                            headers["X-Discord-Locale"] = "en-US" 
+                                            headers["X-Debug-Options"] = "bugReporterEnabled"
+                                            headers["Origin"] = "https://discord.com"
+                                            headers["Alt-Used"] = "discord.com"
+                                            headers["Connection"] = "keep-alive"
+                                            
+                                            # 最后的尝试
+                                            async with session.post(send_message_url, json=message_payload, headers=headers) as final_attempt:
+                                                if final_attempt.status == 200 or final_attempt.status == 201:
+                                                    logger.info("Successfully broke out of captcha loop!")
+                                                    return True, "Message sent successfully after breaking captcha loop", {
+                                                        "channel_id": channel_id
+                                                    }
+                                            
+                                            return False, "Infinite captcha loop detected", {
+                                                "error_type": "infinite_captcha_loop",
+                                                "token_status": "flagged"
                                             }
                                     else:
-                                        logger.error(f"Unknown message send error: {msg_text}")
-                                        return False, f"Failed to send message: Status {msg_status}", {
-                                            "error_type": "unknown_message_error", 
-                                            "status": msg_status
+                                        last_captcha_sitekey = captcha_sitekey
+                                        same_captcha_count = 1
+                                    
+                                    captcha_retry_count += 1
+                                    logger.info(f"Message captcha required ({captcha_retry_count}/{max_captcha_retries})")
+                                    
+                                    # 检查是否达到最大重试次数
+                                    if captcha_retry_count > max_captcha_retries:
+                                        logger.error(f"Exceeded maximum captcha retry limit ({max_captcha_retries})")
+                                        return False, "Too many captchas required", {
+                                            "error_type": "excessive_captchas",
+                                            "token_status": "check"
                                         }
-                                except json.JSONDecodeError:
-                                    logger.error(f"Invalid JSON in message error response: {msg_text}")
-                                    return False, f"Invalid response when sending message", {
-                                        "error_type": "invalid_message_response", 
-                                        "status": msg_status
+                                    
+                                    # 尝试解决验证码
+                                    captcha_solution = await self.solve_discord_captcha(
+                                        captcha_sitekey, captcha_rqdata, None
+                                    )
+                                    
+                                    if captcha_solution:
+                                        # 记录此解决方案已尝试过
+                                        captcha_solutions_tried.add(captcha_solution)
+                                        
+                                        # 添加验证码到头部
+                                        headers["X-Captcha-Key"] = captcha_solution
+                                        
+                                        # 随机等待一下再尝试
+                                        await asyncio.sleep(random.uniform(0.5, 1.0))
+                                        continue
+                                    else:
+                                        logger.error("Failed to solve captcha")
+                                        return False, "Failed to solve captcha", {"error_type": "captcha_solving_failed"}
+                                
+                                # 处理速率限制
+                                elif "retry_after" in response_json:
+                                    retry_after = response_json.get("retry_after", 5)
+                                    logger.warning(f"Rate limited. Retry after {retry_after}s")
+                                    return False, f"Rate limited", {
+                                        "error_type": "rate_limited",
+                                        "retry_after": retry_after
                                     }
+                                
+                                # 其他API错误
+                                elif "message" in response_json:
+                                    error_message = response_json.get("message", "Unknown error")
+                                    logger.error(f"Discord API error: {error_message}")
+                                    return False, f"API error: {error_message}", {
+                                        "error_type": "api_error",
+                                        "message": error_message
+                                    }
+                                
+                            except json.JSONDecodeError:
+                                logger.error(f"Invalid JSON in response: {response_text}")
+                                return False, "Invalid response from Discord API", {
+                                    "error_type": "invalid_response", 
+                                    "status": status
+                                }
+                            
                     except Exception as e:
                         logger.error(f"Exception during message sending: {str(e)}")
-                        return False, f"Message connection error: {str(e)}", {"error_type": "message_connection_error"}
+                        return False, f"Error sending message: {str(e)}", {
+                            "error_type": "exception", 
+                            "error": str(e)
+                        }
                     
-                    # 如果到这里，说明遇到了错误但不是验证码相关的，结束重试
-                    break
-                    
+                    # 短暂等待后再尝试
+                    await asyncio.sleep(random.uniform(1.0, 2.0))
+                
+                # 如果所有尝试都失败了
+                return False, "Failed to send message after multiple attempts", {
+                    "error_type": "max_attempts_reached"
+                }
+                
+        except Exception as e:
+            error_msg = f"Unexpected error in send_dm: {str(e)}"
+            logger.error(error_msg)
+            import traceback
+            logger.debug(traceback.format_exc())
+            return False, error_msg, {"error_type": "unexpected_exception"}
+            
+        # 辅助方法
+        async def _view_user_profile(self, session, user_id):
+            """查看用户个人资料，模拟正常行为"""
+            try:
+                profile_url = f'https://discord.com/api/v9/users/{user_id}/profile'
+                logger.info(f"Simulating human activity by accessing {profile_url}")
+                async with session.get(profile_url) as resp:
+                    logger.debug(f"Profile access status: {resp.status}")
+                return True
             except Exception as e:
-                error_msg = f"Unexpected error in send_dm: {str(e)}"
-                logger.error(error_msg)
-                import traceback
-                logger.debug(traceback.format_exc())
-                return False, error_msg, {"error_type": "unexpected_exception", "error": str(e)}
-        
-        # 正常情况不应该到达这里，但以防万一
-        return False, "Failed to send message after all attempts", {"error_type": "all_attempts_failed"}
+                logger.debug(f"Error during profile access: {e}")
+                return False
+                
+        async def _check_user_settings(self, session):
+            """检查用户设置，模拟正常行为"""
+            try:
+                settings_url = 'https://discord.com/api/v9/users/@me/settings'
+                logger.info(f"Simulating human activity by accessing user settings")
+                async with session.get(settings_url) as resp:
+                    logger.debug(f"Settings access status: {resp.status}")
+                return True
+            except Exception as e:
+                logger.debug(f"Error during settings access: {e}")
+                return False
+                
+        async def _view_user_guilds(self, session):
+            """查看用户服务器列表，模拟正常行为"""
+            try:
+                guilds_url = 'https://discord.com/api/v9/users/@me/guilds'
+                logger.info(f"Simulating human activity by accessing guilds")
+                async with session.get(guilds_url) as resp:
+                    logger.debug(f"Guilds access status: {resp.status}")
+                return True
+            except Exception as e:
+                logger.debug(f"Error during guilds access: {e}")
+                return False
+                
+        async def _check_notifications(self, session):
+            """检查通知，模拟正常行为"""
+            try:
+                notif_url = 'https://discord.com/api/v9/users/@me/mentions'
+                logger.info(f"Simulating human activity by checking notifications")
+                async with session.get(notif_url) as resp:
+                    logger.debug(f"Notifications access status: {resp.status}")
+                return True
+            except Exception as e:
+                logger.debug(f"Error during notifications check: {e}")
+                return False
+                
+        async def _create_dm_channel(self, session, user_id):
+            """创建DM通道"""
+            create_dm_url = 'https://discord.com/api/v9/users/@me/channels'
+            create_dm_payload = {'recipient_id': user_id}
+            
+            try:
+                logger.info("Creating DM channel (attempt 1)")
+                async with session.post(create_dm_url, json=create_dm_payload) as response:
+                    if response.status == 200 or response.status == 201:
+                        response_text = await response.text()
+                        try:
+                            channel_data = json.loads(response_text)
+                            channel_id = channel_data.get('id')
+                            if channel_id:
+                                logger.info(f"Successfully created DM channel: {channel_id}")
+                                return channel_data, channel_id
+                        except json.JSONDecodeError:
+                            pass
+                            
+                    return None, None
+            except Exception:
+                return None, None
+                
+        async def _send_typing_indicator(self, session, channel_id):
+            """发送正在输入指示器"""
+            try:
+                typing_url = f'https://discord.com/api/v9/channels/{channel_id}/typing'
+                async with session.post(typing_url) as typing_resp:
+                    return typing_resp.status == 200 or typing_resp.status == 204
+            except Exception:
+                return False
 
     async def send_bulk_dms(self, template_id: str, user_ids: List[str], 
                             variables: Dict[str, str] = None,

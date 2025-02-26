@@ -332,3 +332,84 @@ class TokenManager:
         except Exception as e:
             logger.error(f"Failed to import tokens from file: {e}")
             return success_count, fail_count
+
+    def cache_captcha_solution(self, token: str, captcha_solution: str) -> None:
+        """
+        缓存已成功解决的验证码解决方案
+        
+        Args:
+            token (str): Discord令牌
+            captcha_solution (str): 验证码解决方案
+        """
+        # 查找令牌数据
+        token_data = None
+        for t in self.tokens:
+            if t.get("token") == token:
+                token_data = t
+                break
+        
+        if not token_data:
+            return
+        
+        # 如果令牌数据没有captcha_solutions字段，创建它
+        if "captcha_solutions" not in token_data:
+            token_data["captcha_solutions"] = {}
+        
+        # 存储验证码解决方案及其最后使用时间
+        token_data["captcha_solutions"]["current"] = {
+            "solution": captcha_solution,
+            "timestamp": int(time.time())
+        }
+        
+        # 保存更新后的令牌数据
+        self._save_tokens()
+        
+        logger.info(f"Cached captcha solution for token: {self._mask_token(token)}")
+
+    def get_cached_captcha_solution(self, token: str) -> Optional[str]:
+        """
+        获取缓存的验证码解决方案
+        
+        Args:
+            token (str): Discord令牌
+        
+        Returns:
+            Optional[str]: 缓存的验证码解决方案，如果没有则返回None
+        """
+        # 查找令牌数据
+        token_data = None
+        for t in self.tokens:
+            if t.get("token") == token:
+                token_data = t
+                break
+        
+        if not token_data or "captcha_solutions" not in token_data:
+            return None
+        
+        # 检查是否有当前解决方案
+        current_solution = token_data["captcha_solutions"].get("current")
+        if not current_solution:
+            return None
+        
+        # 检查解决方案是否过期（超过30分钟）
+        solution_age = int(time.time()) - current_solution.get("timestamp", 0)
+        if solution_age > 1800:  # 30分钟 = 1800秒
+            logger.info(f"Captcha solution for token {self._mask_token(token)} has expired")
+            return None
+        
+        logger.info(f"Using cached captcha solution for token: {self._mask_token(token)}")
+        return current_solution.get("solution")
+
+    def _mask_token(self, token: str) -> str:
+        """
+        掩盖令牌以便安全地记录日志
+        
+        Args:
+            token (str): 完整的Discord令牌
+        
+        Returns:
+            str: 掩盖的令牌，只显示前4个和后4个字符
+        """
+        if len(token) <= 8:
+            return "****"
+        return token[:4] + "****" + token[-4:]
