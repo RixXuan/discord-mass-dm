@@ -380,4 +380,4 @@ class MemberScraper:
     def clear_scrape_history(self) -> None:
         """Clear scraping history."""
         self.last_scrape = {}
-        logger.info("Scrape history cleared")d
+        logger.info("Scrape history cleared")
