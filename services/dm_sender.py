@@ -480,9 +480,14 @@ class DMSender:
         api_key = "e596f2c8b85e862fc96b42c5ac784783bbe6f62d462e2400aa946fa9ed337fbe"
         api_endpoint = "https://api.brightdata.com/dca/solve"
         
+        # 设置认证头
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}"
+        }
+        
         # 构建请求payload
         captcha_payload = {
-            "api_key": api_key,
             "type": "hcaptcha",
             "sitekey": sitekey,
             "url": "https://discord.com",
@@ -498,8 +503,8 @@ class DMSender:
             async with aiohttp.ClientSession() as session:
                 logger.info("Submitting captcha to BrightData API")
                 
-                # 发送验证码请求
-                async with session.post(api_endpoint, json=captcha_payload) as response:
+                # 发送验证码请求，使用Authorization头
+                async with session.post(api_endpoint, json=captcha_payload, headers=headers) as response:
                     if response.status != 200:
                         error_text = await response.text()
                         logger.error(f"BrightData API error: {response.status} - {error_text}")
@@ -519,7 +524,8 @@ class DMSender:
                         logger.info(f"Captcha task submitted. Task ID: {task_id}")
                         
                         # 等待并轮询结果
-                        result_endpoint = f"https://api.brightdata.com/dca/status?api_key={api_key}&task_id={task_id}"
+                        result_endpoint = f"https://api.brightdata.com/dca/status"
+                        status_params = {"task_id": task_id}
                         max_attempts = 30
                         
                         for attempt in range(max_attempts):
@@ -528,7 +534,8 @@ class DMSender:
                             logger.info(f"Waiting {wait_time}s before checking captcha status (attempt {attempt+1}/{max_attempts})")
                             await asyncio.sleep(wait_time)
                             
-                            async with session.get(result_endpoint) as result_response:
+                            # 使用相同的认证头查询状态
+                            async with session.get(result_endpoint, params=status_params, headers=headers) as result_response:
                                 if result_response.status != 200:
                                     logger.warning(f"Error checking captcha status: {result_response.status}")
                                     continue
