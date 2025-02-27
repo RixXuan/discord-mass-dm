@@ -478,7 +478,7 @@ class DMSender:
         
         # BrightData API 配置
         api_key = "e596f2c8b85e862fc96b42c5ac784783bbe6f62d462e2400aa946fa9ed337fbe"
-        api_endpoint = "https://api.brightdata.com/request"  # 修正的API端点
+        api_endpoint = "https://api.brightdata.com/request"
         
         # 设置认证头
         headers = {
@@ -486,68 +486,92 @@ class DMSender:
             "Authorization": f"Bearer {api_key}"
         }
         
-        # 构建请求payload - 基于curl示例修改
+        # 根据错误信息重新构建请求payload
+        # 不要使用captcha作为根级别字段
         captcha_payload = {
-            "zone": "web_unlocker1",  # 使用web_unlocker1区域
-            "url": "https://discord.com",
-            "format": "json",  # 请求json格式的响应
-            # hCaptcha相关参数
-            "captcha": {
-                "type": "hcaptcha",
+            "zone": "web_unlocker1",
+            "url": f"https://discord.com/api/v9/hcaptcha?sitekey={sitekey}",
+            "hcaptcha": {
                 "sitekey": sitekey,
                 "url": "https://discord.com"
-            }
+            },
+            "format": "json"
         }
         
-        # 如果有rqdata，添加到payload
+        # 如果有rqdata，以查询参数形式添加
         if rqdata:
-            captcha_payload["captcha"]["data"] = rqdata
+            captcha_payload["url"] += f"&data={rqdata}"
         
         try:
             async with aiohttp.ClientSession() as session:
-                logger.info("Submitting captcha to BrightData API")
+                logger.info("Submitting captcha to BrightData API with updated format")
+                logger.debug(f"Payload: {json.dumps(captcha_payload)}")
                 
-                # 发送验证码请求，使用Authorization头
+                # 发送验证码请求
                 async with session.post(api_endpoint, json=captcha_payload, headers=headers) as response:
-                    if response.status != 200:
-                        error_text = await response.text()
-                        logger.error(f"BrightData API error: {response.status} - {error_text}")
+                    response_status = response.status
+                    response_text = await response.text()
+                    
+                    if response_status != 200:
+                        logger.error(f"BrightData API error: {response_status} - {response_text}")
                         return None
+                    
+                    logger.debug(f"BrightData raw response: {response_text}")
                     
                     # 尝试解析响应
                     try:
-                        response_text = await response.text()
-                        logger.debug(f"BrightData response: {response_text}")
-                        
                         # 检查是否是JSON
                         try:
                             response_json = json.loads(response_text)
+                            logger.debug(f"Parsed response JSON: {response_json}")
                             
-                            # 检查是否有解决方案
+                            # BrightData可能返回多种格式的响应，尝试查找验证码令牌
+                            
+                            # 方式1: 尝试查找response字段中的令牌
+                            if "response" in response_json:
+                                if isinstance(response_json["response"], dict) and "token" in response_json["response"]:
+                                    token = response_json["response"]["token"]
+                                    logger.info("Found token in response.token")
+                                    return token
+                                elif isinstance(response_json["response"], str) and len(response_json["response"]) > 20:
+                                    logger.info("Found token in response as string")
+                                    return response_json["response"]
+                            
+                            # 方式2: 查找h_captcha_response字段
+                            if "h_captcha_response" in response_json:
+                                logger.info("Found token in h_captcha_response")
+                                return response_json["h_captcha_response"]
+                            
+                            # 方式3: 查找solution字段
                             if "solution" in response_json:
-                                solution = response_json["solution"]["captcha"]["token"]
-                                logger.info("BrightData API returned captcha solution")
-                                return solution
+                                solution = response_json["solution"]
+                                if isinstance(solution, dict):
+                                    if "token" in solution:
+                                        logger.info("Found token in solution.token")
+                                        return solution["token"]
+                                    elif "h_captcha_response" in solution:
+                                        logger.info("Found token in solution.h_captcha_response")
+                                        return solution["h_captcha_response"]
+                                elif isinstance(solution, str) and len(solution) > 20:
+                                    logger.info("Found token in solution as string")
+                                    return solution
                             
-                            # 检查是否有任务ID
-                            elif "task_id" in response_json:
-                                task_id = response_json["task_id"]
-                                solution = await self._poll_brightdata_task(task_id, headers)
-                                return solution
+                            # 方式4: 根据返回的HTML分析可能包含的令牌
+                            if "body" in response_json and isinstance(response_json["body"], str):
+                                html_body = response_json["body"]
+                                # 尝试从HTML中提取hcaptcha响应
+                                import re
+                                token_match = re.search(r'name="h-captcha-response" value="([^"]+)"', html_body)
+                                if token_match:
+                                    logger.info("Found token in HTML body")
+                                    return token_match.group(1)
                             
-                            # 可能是直接返回了token
-                            elif "captcha" in response_json and "token" in response_json["captcha"]:
-                                solution = response_json["captcha"]["token"]
-                                logger.info("BrightData API returned captcha token")
-                                return solution
-                            
-                            # 未找到解决方案，返回错误
-                            else:
-                                logger.error(f"No solution found in BrightData response: {response_json}")
-                                return None
+                            # 未找到任何已知格式的令牌
+                            logger.error(f"No captcha token found in response: {response_json}")
+                            return None
                             
                         except json.JSONDecodeError:
-                            # 可能是直接返回了token字符串
+                            # 可能直接返回了令牌字符串
                             if response_text and len(response_text) > 20 and not response_text.startswith("<"):
                                 logger.info("BrightData API returned raw token")
                                 return response_text.strip()
@@ -556,6 +580,8 @@ class DMSender:
                                 return None
                     except Exception as e:
                         logger.error(f"Error processing BrightData response: {str(e)}")
+                        import traceback
+                        logger.debug(traceback.format_exc())
                         return None
                     
         except Exception as e:
