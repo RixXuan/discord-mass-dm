@@ -15,6 +15,7 @@ from discord.ext import commands
 
 import aiohttp
 from anticaptchaofficial.hcaptchaproxyless import *
+from twocaptcha import TwoCaptcha
 
 from core.token_manager import TokenManager
 from core.user_manager import UserManager
@@ -463,7 +464,7 @@ class DMSender:
             
     async def solve_discord_captcha(self, sitekey, rqdata, rqtoken):
         """
-        使用BrightData API解决Discord的hCaptcha验证码
+        使用2Captcha SDK解决Discord的hCaptcha验证码
         
         Args:
             sitekey (str): hCaptcha的站点密钥
@@ -473,124 +474,58 @@ class DMSender:
         Returns:
             str: 解决的验证码密钥或None如果失败
         """
-        logger.info(f"Attempting to solve Discord hCaptcha using BrightData API")
+        logger.info(f"Attempting to solve Discord hCaptcha using 2Captcha SDK")
         logger.info(f"Sitekey: {sitekey}")
         
-        # BrightData API 配置
-        api_key = "e596f2c8b85e862fc96b42c5ac784783bbe6f62d462e2400aa946fa9ed337fbe"
-        api_endpoint = "https://api.brightdata.com/request"
-        
-        # 设置认证头
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}"
-        }
-        
-        # 根据错误信息重新构建请求payload
-        # 不要使用captcha作为根级别字段
-        captcha_payload = {
-            "zone": "web_unlocker1",
-            "url": f"https://discord.com/api/v9/hcaptcha?sitekey={sitekey}",
-            "hcaptcha": {
-                "sitekey": sitekey,
-                "url": "https://discord.com"
-            },
-            "format": "json"
-        }
-        
-        # 如果有rqdata，以查询参数形式添加
-        if rqdata:
-            captcha_payload["url"] += f"&data={rqdata}"
-        
         try:
-            async with aiohttp.ClientSession() as session:
-                logger.info("Submitting captcha to BrightData API with updated format")
-                logger.debug(f"Payload: {json.dumps(captcha_payload)}")
-                
-                # 发送验证码请求
-                async with session.post(api_endpoint, json=captcha_payload, headers=headers) as response:
-                    response_status = response.status
-                    response_text = await response.text()
+            from twocaptcha import TwoCaptcha
+            
+            # 2Captcha API密钥
+            api_key = "2bfd4c215b085a1ceba76002f183ea83"
+            
+            # 初始化2captcha solver
+            solver = TwoCaptcha(api_key)
+            
+            # 准备参数
+            params = {
+                'sitekey': sitekey,
+                'url': 'https://discord.com'
+            }
+            
+            # 如果有rqdata，添加到参数
+            if rqdata:
+                params['data'] = rqdata
+            
+            # 如果有rqtoken，标记为隐形验证码
+            if rqtoken:
+                params['invisible'] = 1
+            
+            # 包装异步调用
+            def solve_captcha():
+                try:
+                    logger.info("Submitting captcha to 2Captcha")
+                    result = solver.hcaptcha(**params)
+                    logger.info("Captcha successfully solved!")
+                    return result.get('code')  # 返回验证码令牌
+                except Exception as e:
+                    logger.error(f"2Captcha SDK error: {str(e)}")
+                    return None
                     
-                    if response_status != 200:
-                        logger.error(f"BrightData API error: {response_status} - {response_text}")
-                        return None
-                    
-                    logger.debug(f"BrightData raw response: {response_text}")
-                    
-                    # 尝试解析响应
-                    try:
-                        # 检查是否是JSON
-                        try:
-                            response_json = json.loads(response_text)
-                            logger.debug(f"Parsed response JSON: {response_json}")
-                            
-                            # BrightData可能返回多种格式的响应，尝试查找验证码令牌
-                            
-                            # 方式1: 尝试查找response字段中的令牌
-                            if "response" in response_json:
-                                if isinstance(response_json["response"], dict) and "token" in response_json["response"]:
-                                    token = response_json["response"]["token"]
-                                    logger.info("Found token in response.token")
-                                    return token
-                                elif isinstance(response_json["response"], str) and len(response_json["response"]) > 20:
-                                    logger.info("Found token in response as string")
-                                    return response_json["response"]
-                            
-                            # 方式2: 查找h_captcha_response字段
-                            if "h_captcha_response" in response_json:
-                                logger.info("Found token in h_captcha_response")
-                                return response_json["h_captcha_response"]
-                            
-                            # 方式3: 查找solution字段
-                            if "solution" in response_json:
-                                solution = response_json["solution"]
-                                if isinstance(solution, dict):
-                                    if "token" in solution:
-                                        logger.info("Found token in solution.token")
-                                        return solution["token"]
-                                    elif "h_captcha_response" in solution:
-                                        logger.info("Found token in solution.h_captcha_response")
-                                        return solution["h_captcha_response"]
-                                elif isinstance(solution, str) and len(solution) > 20:
-                                    logger.info("Found token in solution as string")
-                                    return solution
-                            
-                            # 方式4: 根据返回的HTML分析可能包含的令牌
-                            if "body" in response_json and isinstance(response_json["body"], str):
-                                html_body = response_json["body"]
-                                # 尝试从HTML中提取hcaptcha响应
-                                import re
-                                token_match = re.search(r'name="h-captcha-response" value="([^"]+)"', html_body)
-                                if token_match:
-                                    logger.info("Found token in HTML body")
-                                    return token_match.group(1)
-                            
-                            # 未找到任何已知格式的令牌
-                            logger.error(f"No captcha token found in response: {response_json}")
-                            return None
-                            
-                        except json.JSONDecodeError:
-                            # 可能直接返回了令牌字符串
-                            if response_text and len(response_text) > 20 and not response_text.startswith("<"):
-                                logger.info("BrightData API returned raw token")
-                                return response_text.strip()
-                            else:
-                                logger.error(f"Failed to parse BrightData response: {response_text}")
-                                return None
-                    except Exception as e:
-                        logger.error(f"Error processing BrightData response: {str(e)}")
-                        import traceback
-                        logger.debug(traceback.format_exc())
-                        return None
-                    
+            # 在异步环境中执行同步代码
+            loop = asyncio.get_running_loop()
+            solution = await loop.run_in_executor(None, solve_captcha)
+            
+            return solution
+            
+        except ImportError:
+            logger.error("twocaptcha package not installed. Please install it with: pip install 2captcha-python")
+            return None
         except Exception as e:
-            logger.error(f"Exception during BrightData captcha solving: {str(e)}")
+            logger.error(f"Unexpected error in solve_discord_captcha: {str(e)}")
             import traceback
             logger.debug(traceback.format_exc())
             return None
-        
-        return None  # 默认返回None
+    
         
     async def _poll_brightdata_task(self, task_id, headers):
         """轮询BrightData任务状态，获取验证码解决方案"""
