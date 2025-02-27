@@ -478,7 +478,7 @@ class DMSender:
         
         # BrightData API 配置
         api_key = "e596f2c8b85e862fc96b42c5ac784783bbe6f62d462e2400aa946fa9ed337fbe"
-        api_endpoint = "https://api.brightdata.com/dca/solve"
+        api_endpoint = "https://api.brightdata.com/request"  # 修正的API端点
         
         # 设置认证头
         headers = {
@@ -486,18 +486,22 @@ class DMSender:
             "Authorization": f"Bearer {api_key}"
         }
         
-        # 构建请求payload
+        # 构建请求payload - 基于curl示例修改
         captcha_payload = {
-            "type": "hcaptcha",
-            "sitekey": sitekey,
+            "zone": "web_unlocker1",  # 使用web_unlocker1区域
             "url": "https://discord.com",
-            "invisible": False,
-            "enterprise": True,  # Discord使用企业版hCaptcha
+            "format": "json",  # 请求json格式的响应
+            # hCaptcha相关参数
+            "captcha": {
+                "type": "hcaptcha",
+                "sitekey": sitekey,
+                "url": "https://discord.com"
+            }
         }
         
         # 如果有rqdata，添加到payload
         if rqdata:
-            captcha_payload["data"] = rqdata
+            captcha_payload["captcha"]["data"] = rqdata
         
         try:
             async with aiohttp.ClientSession() as session:
@@ -510,63 +514,49 @@ class DMSender:
                         logger.error(f"BrightData API error: {response.status} - {error_text}")
                         return None
                     
-                    response_json = await response.json()
-                    
-                    # 检查是否成功提交
-                    if "solution" in response_json:
-                        solution = response_json["solution"]
-                        logger.info("BrightData API returned captcha solution immediately")
-                        return solution
-                    
-                    # 如果需要等待结果
-                    if "task_id" in response_json:
-                        task_id = response_json["task_id"]
-                        logger.info(f"Captcha task submitted. Task ID: {task_id}")
+                    # 尝试解析响应
+                    try:
+                        response_text = await response.text()
+                        logger.debug(f"BrightData response: {response_text}")
                         
-                        # 等待并轮询结果
-                        result_endpoint = f"https://api.brightdata.com/dca/status"
-                        status_params = {"task_id": task_id}
-                        max_attempts = 30
-                        
-                        for attempt in range(max_attempts):
-                            # 每次检查之间等待时间，根据尝试次数逐渐增加
-                            wait_time = min(2 + attempt * 0.5, 10)  # 从2秒开始，最大到10秒
-                            logger.info(f"Waiting {wait_time}s before checking captcha status (attempt {attempt+1}/{max_attempts})")
-                            await asyncio.sleep(wait_time)
+                        # 检查是否是JSON
+                        try:
+                            response_json = json.loads(response_text)
                             
-                            # 使用相同的认证头查询状态
-                            async with session.get(result_endpoint, params=status_params, headers=headers) as result_response:
-                                if result_response.status != 200:
-                                    logger.warning(f"Error checking captcha status: {result_response.status}")
-                                    continue
-                                
-                                result_json = await result_response.json()
-                                logger.debug(f"Captcha status response: {result_json}")
-                                
-                                # 检查状态
-                                status = result_json.get("status")
-                                
-                                if status == "solved":
-                                    solution = result_json.get("solution")
-                                    logger.info("Captcha successfully solved")
-                                    return solution
-                                elif status == "failed":
-                                    error_message = result_json.get("error") or "Unknown error"
-                                    logger.error(f"Captcha solving failed: {error_message}")
-                                    return None
-                                elif status == "processing":
-                                    logger.info("Captcha still processing...")
-                                    continue
-                                else:
-                                    logger.warning(f"Unknown captcha status: {status}")
-                                    continue
-                        
-                        logger.error(f"Captcha solution timed out after {max_attempts} attempts")
+                            # 检查是否有解决方案
+                            if "solution" in response_json:
+                                solution = response_json["solution"]["captcha"]["token"]
+                                logger.info("BrightData API returned captcha solution")
+                                return solution
+                            
+                            # 检查是否有任务ID
+                            elif "task_id" in response_json:
+                                task_id = response_json["task_id"]
+                                solution = await self._poll_brightdata_task(task_id, headers)
+                                return solution
+                            
+                            # 可能是直接返回了token
+                            elif "captcha" in response_json and "token" in response_json["captcha"]:
+                                solution = response_json["captcha"]["token"]
+                                logger.info("BrightData API returned captcha token")
+                                return solution
+                            
+                            # 未找到解决方案，返回错误
+                            else:
+                                logger.error(f"No solution found in BrightData response: {response_json}")
+                                return None
+                            
+                        except json.JSONDecodeError:
+                            # 可能是直接返回了token字符串
+                            if response_text and len(response_text) > 20 and not response_text.startswith("<"):
+                                logger.info("BrightData API returned raw token")
+                                return response_text.strip()
+                            else:
+                                logger.error(f"Failed to parse BrightData response: {response_text}")
+                                return None
+                    except Exception as e:
+                        logger.error(f"Error processing BrightData response: {str(e)}")
                         return None
-                    
-                    # 如果没有task_id也没有solution，返回错误
-                    logger.error(f"Unexpected response from BrightData API: {response_json}")
-                    return None
                     
         except Exception as e:
             logger.error(f"Exception during BrightData captcha solving: {str(e)}")
@@ -575,6 +565,68 @@ class DMSender:
             return None
         
         return None  # 默认返回None
+        
+    async def _poll_brightdata_task(self, task_id, headers):
+        """轮询BrightData任务状态，获取验证码解决方案"""
+        api_endpoint = f"https://api.brightdata.com/request/{task_id}"
+        max_attempts = 30
+        
+        for attempt in range(max_attempts):
+            # 等待时间逐渐增加
+            wait_time = min(2 + attempt * 0.5, 10)
+            logger.info(f"Waiting {wait_time}s before checking task status (attempt {attempt+1}/{max_attempts})")
+            await asyncio.sleep(wait_time)
+            
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(api_endpoint, headers=headers) as response:
+                        if response.status != 200:
+                            logger.warning(f"Error checking task status: {response.status}")
+                            continue
+                        
+                        response_text = await response.text()
+                        try:
+                            response_json = json.loads(response_text)
+                            
+                            # 检查是否完成
+                            status = response_json.get("status")
+                            
+                            if status == "done":
+                                if "solution" in response_json and "captcha" in response_json["solution"]:
+                                    solution = response_json["solution"]["captcha"]["token"]
+                                    logger.info("Captcha successfully solved")
+                                    return solution
+                                elif "captcha" in response_json and "token" in response_json["captcha"]:
+                                    solution = response_json["captcha"]["token"]
+                                    logger.info("Captcha successfully solved")
+                                    return solution
+                                else:
+                                    logger.error(f"No solution in completed task: {response_json}")
+                                    return None
+                            
+                            elif status == "error":
+                                error_message = response_json.get("error", "Unknown error")
+                                logger.error(f"Task failed: {error_message}")
+                                return None
+                            
+                            elif status in ["pending", "processing"]:
+                                logger.info(f"Task is {status}...")
+                                continue
+                            
+                            else:
+                                logger.warning(f"Unknown task status: {status}")
+                                continue
+                            
+                        except json.JSONDecodeError:
+                            logger.error(f"Failed to parse task status response: {response_text}")
+                            continue
+                        
+            except Exception as e:
+                logger.error(f"Error polling task status: {str(e)}")
+                continue
+        
+        logger.error(f"Task polling timed out after {max_attempts} attempts")
+        return None
 
     async def pre_authenticate_captcha(self, token):
         """
